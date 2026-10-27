@@ -1,21 +1,13 @@
-Keep a todo list beside the work it belongs to, in the sidebar and in
-your agent threads.
-
 ## What you get
 
-- An **Example todos** page in the left sidebar that adds, completes, and
-  removes todos.
-- A `bb thread-glow` command that does the same from a terminal.
-- Live updates, so a change made in one place reaches every open page at once.
+Thread Glow colours a thread orange when observed work stops, so you can find it in the thread list. When the thread is open in a split view, its pane title uses the same highlight.
+
+Selecting the thread clears its highlight. Starting work again or an error also clears it.
 
 ## How it works
 
-The todos live in this plugin's own storage on the BB server, one list per
-installation. Nothing leaves the machine, and the plugin needs no account, API
-key, or external service.
+The plugin observes thread status while the BB window is open and stores highlights in that client's local storage. It does not reconstruct completion events that happened while the window was closed. A highlight means a transition to idle was observed; check the conversation to confirm the task result.
 
-## For agents
+## Requirements
 
-The bundled skill tells an agent to read the list with `bb thread-glow list`, add
-one todo at a time with `bb thread-glow add`, and close finished work with
-`bb thread-glow done`.
+BB 0.47 or later. No account, API key, or external service is required. The plugin relies on the current BB sidebar and split-pane markup, which may change in a future BB update.

@@ -1,198 +1,84 @@
-// bb-plugin-thread-glow — a BB plugin frontend entry.
-//
-// Compiled by `bb plugin build` into dist/app.js + dist/app.css. React and
-// @get-bb/plugin-sdk/app are provided by the BB app at load time (never bundled),
-// so this file must be loaded by BB, not imported directly.
-//
-// The components under components/ui/ are YOURS: vendored source (shadcn
-// model), edit freely. Add more from the BB registry with
-// `npx shadcn add @bb/<name>` (see components.json) — dropdowns, tables,
-// the full shadcn set, version-matched to this BB install. Run
-// `npm install` once before `bb plugin build`.
-import { useCallback, useEffect, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
-import { definePluginApp, useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
-import type { rpcContract, Todo } from "./server";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Icon } from "@/components/ui/icon";
-import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { useEffect, useRef } from "react";
+import { definePluginApp, experimental_useSidebarThreads, useBbContext, useSidebarSplitLayout } from "@get-bb/plugin-sdk/app";
 
-/** The todo list, kept current by the server's "todos-changed" signal. */
-function useTodos() {
-  const rpc = useRpc<typeof rpcContract>();
-  const [todos, setTodos] = useState<Todo[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const report = useCallback((cause: unknown) => {
-    setError(cause instanceof Error ? cause.message : String(cause));
-  }, []);
-  const refetch = useCallback(() => {
-    rpc.call("todos_list").then((result) => {
-      setTodos(result.todos);
-      setError(null);
-    }, report);
-  }, [rpc, report]);
+const KEY = "thread-glow.completed.v1";
+const CLASS = "thread-glow-completed";
+const HEADER_CLASS = "thread-glow-pane-header";
+
+function Monitor() {
+  const { threads, status } = experimental_useSidebarThreads();
+  const { threadId } = useBbContext();
+  const split = useSidebarSplitLayout();
+  const focusedThreadId = split?.panes.find(pane => pane.isFocused)?.threadId ?? threadId;
+  const previous = useRef(new Map<string, string>());
+  const completed = useRef(new Set<string>());
+  const ready = useRef(false);
+  const paneThreads = useRef(new Map<string, string>());
+  const paintRef = useRef<() => void>(() => {});
+
   useEffect(() => {
-    refetch();
-  }, [refetch]);
-  // server.ts publishes after every write — from this page, another window,
-  // or `bb thread-glow add` run by an agent — so the list never goes stale.
-  useRealtime("todos-changed", refetch);
-  return { rpc, todos, error, report, refetch };
-}
-
-function TodoRow({
-  todo,
-  onToggle,
-  onRemove,
-}: {
-  todo: Todo;
-  onToggle: (done: boolean) => void;
-  onRemove: () => void;
-}) {
-  return (
-    <li className="flex items-center gap-3 py-2.5 text-sm">
-      <Checkbox
-        checked={todo.done}
-        onCheckedChange={(checked) => onToggle(checked === true)}
-        aria-label={`Mark "${todo.title}" ${todo.done ? "not done" : "done"}`}
-      />
-      <span
-        className={cn(
-          "min-w-0 flex-1 truncate",
-          todo.done && "text-muted-foreground line-through",
-        )}
-      >
-        {todo.title}
-      </span>
-      <span className="hidden font-mono text-xs text-muted-foreground sm:inline">
-        {todo.id}
-      </span>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-7 text-muted-foreground hover:text-foreground"
-        aria-label={`Remove "${todo.title}"`}
-        onClick={onRemove}
-      >
-        <Icon name="Trash2" className="size-4" />
-      </Button>
-    </li>
-  );
-}
-
-/** The dashed box BB's own list pages use for loading and empty states. */
-function EmptyState({ children }: { children: ReactNode }) {
-  return (
-    <div
-      role="status"
-      className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground"
-    >
-      {children}
-    </div>
-  );
-}
-
-// Tailwind classes compile against the host theme's live CSS variables —
-// derive colors from the theme tokens, never hardcoded grays. The frame
-// (scrolling page, centered column) matches BB's own nav-panel pages.
-function TodosPage() {
-  const { rpc, todos, error, report, refetch } = useTodos();
-  const [title, setTitle] = useState("");
-  const [pending, setPending] = useState(false);
-  const add = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const next = title.trim();
-    if (next === "" || pending) return;
-    setPending(true);
     try {
-      await rpc.call("todos_add", { title: next });
-      setTitle("");
-      refetch();
-    } catch (cause) {
-      report(cause);
-    } finally {
-      setPending(false);
+      const saved: unknown = JSON.parse(localStorage.getItem(KEY) ?? "[]");
+      if (Array.isArray(saved)) completed.current = new Set(saved.filter((v): v is string => typeof v === "string"));
+    } catch { /* Ignore invalid saved state. */ }
+    const save = () => { try { localStorage.setItem(KEY, JSON.stringify([...completed.current])); } catch {} };
+    const paint = () => {
+      document.querySelectorAll<HTMLElement>('[data-sidebar-thread-id]').forEach(row => {
+        const marked = completed.current.has(row.dataset.sidebarThreadId ?? "");
+        if (row.classList.contains(CLASS) !== marked) row.classList.toggle(CLASS, marked);
+      });
+      document.querySelectorAll<HTMLElement>("[data-split-pane-id]").forEach(pane => {
+        const thread = paneThreads.current.get(pane.dataset.splitPaneId ?? "");
+        const marked = !!thread && completed.current.has(thread);
+        const header = Array.from(pane.querySelectorAll<HTMLElement>('div[class~="-my-1"][class~="-ml-2"][class~="rounded-md"]'))
+          .find(el => el.closest("[data-split-pane-id]") === pane && !!el.querySelector("p"));
+        if (header && header.classList.contains(HEADER_CLASS) !== marked) header.classList.toggle(HEADER_CLASS, marked);
+      });
+    };
+    paintRef.current = paint;
+    const onClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const row = target.closest<HTMLElement>('[data-sidebar-thread-id]');
+      const id = row?.dataset.sidebarThreadId;
+      if (id && completed.current.delete(id)) { save(); paint(); }
+    };
+    const style = document.createElement("style");
+    style.textContent = `.group\\/thread-row:has(a.${CLASS}) { background-color: rgba(255, 128, 48, .38) !important; } .${HEADER_CLASS} { background-color: rgba(255, 128, 48, .38) !important; }`;
+    document.head.appendChild(style);
+    const observer = new MutationObserver(paint);
+    observer.observe(document.body, { childList: true, subtree: true });
+    document.addEventListener("click", onClick, true);
+    paint();
+    return () => { observer.disconnect(); document.removeEventListener("click", onClick, true); document.querySelectorAll(`.${CLASS}, .${HEADER_CLASS}`).forEach(el => el.classList.remove(CLASS, HEADER_CLASS)); paintRef.current = () => {}; style.remove(); };
+  }, []);
+
+  useEffect(() => {
+    if (!focusedThreadId || !completed.current.delete(focusedThreadId)) return;
+    try { localStorage.setItem(KEY, JSON.stringify([...completed.current])); } catch {}
+    paintRef.current();
+  }, [focusedThreadId]);
+
+  useEffect(() => {
+    if (status !== "ready") return;
+    for (const t of threads) {
+      const before = previous.current.get(t.id);
+      if (ready.current && before === "active" && t.status === "idle") completed.current.add(t.id);
+      if (t.status === "active" || t.status === "error") completed.current.delete(t.id);
+      previous.current.set(t.id, t.status);
     }
-  };
-  const doneCount = todos?.filter((todo) => todo.done).length ?? 0;
-  return (
-    <div className="h-full min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto box-border w-full max-w-3xl px-4 pb-4 pt-3 md:px-5 md:pt-4">
-        <p className="text-sm text-muted-foreground">
-          Agents keep this list with <code>bb thread-glow</code>; the skill in{" "}
-          <code>skills/example-todos</code> tells them how.
-        </p>
-        <form onSubmit={add} className="mt-4 flex items-center gap-2">
-          <Input
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder="What needs doing?"
-            aria-label="New todo"
-          />
-          <Button type="submit" disabled={pending || title.trim() === ""}>
-            <Icon name="Plus" className="size-4" />
-            Add
-          </Button>
-        </form>
-        {error === null ? null : (
-          <p role="alert" className="mt-3 text-sm text-destructive">
-            {error}
-          </p>
-        )}
-        <div className="mt-4">
-          {todos === null ? (
-            <EmptyState>Loading todos…</EmptyState>
-          ) : todos.length === 0 ? (
-            <EmptyState>
-              Nothing to do. Add one above, or run{" "}
-              <code>bb thread-glow add "Ship it"</code>.
-            </EmptyState>
-          ) : (
-            <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card px-4">
-              {todos.map((todo) => (
-                <TodoRow
-                  key={todo.id}
-                  todo={todo}
-                  onToggle={(done) => {
-                    rpc
-                      .call("todos_set_done", { id: todo.id, done })
-                      .then(refetch, report);
-                  }}
-                  onRemove={() => {
-                    rpc
-                      .call("todos_remove", { id: todo.id })
-                      .then(refetch, report);
-                  }}
-                />
-              ))}
-            </ul>
-          )}
-        </div>
-        {todos !== null && todos.length > 0 ? (
-          <p className="mt-2 text-xs text-muted-foreground">
-            {doneCount} of {todos.length} done
-          </p>
-        ) : null}
-      </div>
-    </div>
-  );
+    ready.current = true;
+    try { localStorage.setItem(KEY, JSON.stringify([...completed.current])); } catch {}
+    paintRef.current();
+  }, [threads, status]);
+
+  useEffect(() => {
+    paneThreads.current = new Map((split?.panes ?? []).filter(pane => pane.threadId !== null).map(pane => [pane.paneId, pane.threadId as string]));
+    paintRef.current();
+  }, [split]);
+  return null;
 }
 
-// The default export must be definePluginApp(...); BB interprets it after
-// loading the bundle. navPanel adds a page to the left sidebar; register
-// other UI under app.slots and composer actions, plus-menu rows, banners, or
-// rich-text rules with app.composer.customize(...) (see the bb guide's
-// plugins chapter).
-export default definePluginApp((app) => {
-  app.slots.navPanel({
-    id: "example-todos",
-    title: "Example todos",
-    icon: "ListTodo",
-    // Routed at /plugins/thread-glow/example-todos; the component receives the
-    // remainder as `subPath` for deep links within the page.
-    path: "example-todos",
-    component: TodosPage,
-  });
+export default definePluginApp(app => {
+  app.slots.experimental_appOverlay({ id: "monitor", component: Monitor });
 });
