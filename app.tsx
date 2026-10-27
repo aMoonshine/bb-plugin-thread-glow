@@ -10,6 +10,8 @@ function Monitor() {
   const { threadId } = useBbContext();
   const split = useSidebarSplitLayout();
   const focusedThreadId = split?.panes.find(pane => pane.isFocused)?.threadId ?? threadId;
+  const focusedThreadRef = useRef(focusedThreadId);
+  focusedThreadRef.current = focusedThreadId;
   const previous = useRef(new Map<string, string>());
   const completed = useRef(new Set<string>());
   const ready = useRef(false);
@@ -48,9 +50,14 @@ function Monitor() {
     document.head.appendChild(style);
     const observer = new MutationObserver(paint);
     observer.observe(document.body, { childList: true, subtree: true });
+    const onFocus = () => {
+      const id = focusedThreadRef.current;
+      if (id && completed.current.delete(id)) { save(); paint(); }
+    };
     document.addEventListener("click", onClick, true);
+    window.addEventListener("focus", onFocus);
     paint();
-    return () => { observer.disconnect(); document.removeEventListener("click", onClick, true); document.querySelectorAll(`.${CLASS}, .${HEADER_CLASS}`).forEach(el => el.classList.remove(CLASS, HEADER_CLASS)); paintRef.current = () => {}; style.remove(); };
+    return () => { observer.disconnect(); document.removeEventListener("click", onClick, true); window.removeEventListener("focus", onFocus); document.querySelectorAll(`.${CLASS}, .${HEADER_CLASS}`).forEach(el => el.classList.remove(CLASS, HEADER_CLASS)); paintRef.current = () => {}; style.remove(); };
   }, []);
 
   useEffect(() => {
@@ -63,7 +70,7 @@ function Monitor() {
     if (status !== "ready") return;
     for (const t of threads) {
       const before = previous.current.get(t.id);
-      if (ready.current && before === "active" && t.status === "idle") completed.current.add(t.id);
+      if (ready.current && before === "active" && t.status === "idle" && !(t.id === focusedThreadRef.current && document.hasFocus())) completed.current.add(t.id);
       if (t.status === "active" || t.status === "error") completed.current.delete(t.id);
       previous.current.set(t.id, t.status);
     }
