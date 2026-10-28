@@ -4,6 +4,16 @@ import { definePluginApp, experimental_useSidebarThreads, useBbContext, useSideb
 const KEY = "thread-glow.completed.v1";
 const CLASS = "thread-glow-completed";
 const HEADER_CLASS = "thread-glow-pane-header";
+const PANE_TITLE = 'div[class~="-my-1"][class~="-ml-2"][class~="rounded-md"]';
+
+function closeButtonForTitle(target: EventTarget | null): HTMLButtonElement | null {
+  if (!(target instanceof Element) || target.closest("button, a, input, textarea, [contenteditable='true']")) return null;
+  const title = target.closest<HTMLElement>(PANE_TITLE);
+  const pane = title?.closest<HTMLElement>("[data-split-pane-id]");
+  if (!title || !pane || !title.querySelector("p")) return null;
+  return Array.from(pane.querySelectorAll<HTMLButtonElement>('button[aria-label="Close pane"]'))
+    .find(button => button.closest("[data-split-pane-id]") === pane && !button.disabled) ?? null;
+}
 
 function Monitor() {
   const { threads, status } = experimental_useSidebarThreads();
@@ -45,6 +55,16 @@ function Monitor() {
       const id = row?.dataset.sidebarThreadId;
       if (id && completed.current.delete(id)) { save(); paint(); }
     };
+    const onMiddleDown = (event: MouseEvent) => {
+      if (event.button === 1 && closeButtonForTitle(event.target)) event.preventDefault();
+    };
+    const onMiddleClick = (event: MouseEvent) => {
+      if (event.button !== 1) return;
+      const close = closeButtonForTitle(event.target);
+      if (!close) return;
+      event.preventDefault();
+      close.click();
+    };
     const style = document.createElement("style");
     style.textContent = `.group\\/thread-row:has(a.${CLASS}) { background-color: rgba(255, 128, 48, .38) !important; } .${HEADER_CLASS} { background-color: rgba(255, 128, 48, .38) !important; }`;
     document.head.appendChild(style);
@@ -55,9 +75,11 @@ function Monitor() {
       if (id && completed.current.delete(id)) { save(); paint(); }
     };
     document.addEventListener("click", onClick, true);
+    document.addEventListener("mousedown", onMiddleDown, true);
+    document.addEventListener("auxclick", onMiddleClick, true);
     window.addEventListener("focus", onFocus);
     paint();
-    return () => { observer.disconnect(); document.removeEventListener("click", onClick, true); window.removeEventListener("focus", onFocus); document.querySelectorAll(`.${CLASS}, .${HEADER_CLASS}`).forEach(el => el.classList.remove(CLASS, HEADER_CLASS)); paintRef.current = () => {}; style.remove(); };
+    return () => { observer.disconnect(); document.removeEventListener("click", onClick, true); document.removeEventListener("mousedown", onMiddleDown, true); document.removeEventListener("auxclick", onMiddleClick, true); window.removeEventListener("focus", onFocus); document.querySelectorAll(`.${CLASS}, .${HEADER_CLASS}`).forEach(el => el.classList.remove(CLASS, HEADER_CLASS)); paintRef.current = () => {}; style.remove(); };
   }, []);
 
   useEffect(() => {

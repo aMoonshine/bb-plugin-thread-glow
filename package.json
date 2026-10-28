@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-thread-glow",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "engines": {
     "bb": ">=0.47",
@@ -8,7 +8,7 @@
   },
   "bb": {
     "name": "Thread Glow",
-    "description": "Highlights completed threads in the sidebar and split-pane headers.",
+    "description": "Highlights completed threads and closes open panes with a middle-click.",
     "branding": {
       "icon": "Circle"
     },
